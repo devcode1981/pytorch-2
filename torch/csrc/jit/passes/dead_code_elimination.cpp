@@ -9,54 +9,47 @@ namespace jit {
 
 class DeadCodeEliminator {
  public:
-  // If given a top-level graph, DCE will construct an aliasDb that allows for
-  // "smarter" dead code elimination (we will eliminate mutable ops if we can
-  // prove the mutated values are not used).
-  //
-  // Otherwise, we will not allow DCE to eliminate mutable ops.
   explicit DeadCodeEliminator(std::shared_ptr<Graph> graph)
       : aliasDb_(AliasAnalysis(graph)) {}
   DeadCodeEliminator(){};
 
-
   // The algorithm is an inverse mark-and-sweep. Starting from the return node,
-  // we mark "live" nodes based on
-  void runMarkSweep(Block* block, bool recurse) {
+  // we mark "live" nodes that are necessary for the output. Nodes that have
+  // side effects are also marked.
+  void run(Block* block, bool recurse) {
     // Add return node to work list
-    addToWorkList(block->return_node());
+    markAndEnqueue(block->return_node());
 
-    // Mark all nodes with side effects as well.
+    mark(block);
+    sweep(block, recurse);
+  }
+
+  void mark(Block* block) {
+    // Mark all nodes with side effects.
     for (auto node : block->nodes()) {
       if (hasSideEffects(node)) {
-        addToWorkList(node);
+        markAndEnqueue(node);
       }
     }
 
-    while (!workList_.empty()) {
-      auto node = workList_.front();
-      workList_.pop_front();
-
-      // Mark this node
-      marked_.insert(node);
+    while (!workQueue_.empty()) {
+      auto node = workQueue_.front();
+      workQueue_.pop_front();
 
       for (auto subBlock : node->blocks()) {
-        runMarkSweep(subBlock, recurse);
+        mark(subBlock);
       }
 
-      // If this node is in a sub-block of `block`, traverse the blockchain
-      // upwards until we find the containing node in `block`.
+      // Mark all nodes in this node's blockchain
       if (node->owningBlock() != block) {
-        auto topLevelNode = node;
-        while (topLevelNode) {
-          if (!topLevelNode->owningBlock()) {
+        auto curNode = node;
+        while (curNode) {
+          if (!curNode->owningBlock()) {
             break;
           }
 
-          if (topLevelNode->owningBlock() == block) {
-            addToWorkList(topLevelNode);
-            break;
-          }
-          topLevelNode = topLevelNode->owningBlock()->owningNode();
+          markAndEnqueue(curNode);
+          curNode = curNode->owningBlock()->owningNode();
         }
       }
 
@@ -64,22 +57,20 @@ class DeadCodeEliminator {
       if (aliasDb_) {
         for (auto writer : aliasDb_->getWritersForNode(node)) {
           if (writer->isBefore(node)) {
-            addToWorkList(writer);
+            markAndEnqueue(writer);
           }
         }
       }
 
       // Find producers for all inputs, add to work list
       for (auto input : node->inputs()) {
-        addToWorkList(input->node());
+        markAndEnqueue(input->node());
       }
     }
+  }
 
-
-
-    // Sweep:
-    // In reverse order:
-    //   If the node is not marked, delete it.
+  // Delete all unmarked nodes.
+  void sweep(Block* block, bool recurse) {
     auto nodes = block->nodes().reverse();
     for (auto it = nodes.begin(); it != nodes.end(); it++) {
       auto node = *it;
@@ -97,43 +88,32 @@ class DeadCodeEliminator {
     }
   }
 
-
-
-  void run(Block* block, bool recurse) {
-    auto nodes = block->nodes().reverse();
-    for (auto it = nodes.begin(); it != nodes.end(); it++) {
-      auto node = *it;
-      // note these occur before the recursion because we want to uncover
-      // dead code in the blocks used to calculate the output
-      removeDeadIfOutputs(node);
-      removeDeadLoopOutputs(node);
-      if (recurse) {
-        for (Block* block : node->blocks())
-          run(block, true);
-      }
-      if (!node->hasUses() && !hasSideEffects(node))
-        it.destroyCurrent();
-    }
-  }
-
  private:
-  std::unordered_set<Node*> marked_;
-  void addToWorkList(Node* n) {
+  void markAndEnqueue(Node* n) {
     if (!marked_.count(n)) {
-      workList_.push_back(n);
+      marked_.insert(n);
+      workQueue_.push_back(n);
     }
   }
 
-  std::list<Node*> workList_;
-
-  bool isMutable(Node* node) {
-    if (!node->kind().is_aten())
-      return false;
-    // onnx export calls EliminateDeadCode but sometimes passes invalid
-    // aten operators. So we call maybeSchema so we handle the cases when
-    // there is no valid schema for a node
-    auto schema = node->maybeSchema();
-    return schema && schema->is_mutable();
+  bool hasUntrackedMutation(Node* node) {
+    // If we don't have alias information, all mutable ops have unknown effects
+    if (!aliasDb_) {
+      if (!node->kind().is_aten()) {
+        return false;
+      }
+      // onnx export calls EliminateDeadCode but sometimes passes invalid
+      // aten operators. So we call maybeSchema so we handle the cases when
+      // there is no valid schema for a node
+      auto schema = node->maybeSchema();
+      return schema && schema->is_mutable();
+    } else {
+      // Otherwise, there are two kinds of nodes with untracked effects:
+      // 1. Nodes that write to a value that may alias the graph inputs (since
+      //    the inputs can be used outside the graph)
+      // 2. Anything that has a wildcard set.
+      return aliasDb_->writesToInputAlias(node) || aliasDb_->hasWildcard(node);
+    }
   }
 
   bool hasSideEffects(Node* node) {
@@ -143,22 +123,15 @@ class DeadCodeEliminator {
     auto it = memo_.find(node);
     if (it != memo_.end())
       return it->second;
-    bool has_side_effects = node->kind() == prim::Print ||
-        node->kind() == prim::RaiseException ||
-        std::any_of(node->blocks().begin(),
-                    node->blocks().end(),
-                    [&](Block* b) {
-                      return std::any_of(
-                          b->nodes().begin(), b->nodes().end(), [&](Node* n) {
-                            return hasSideEffects(n);
-                          });
-                    });
-
-    if (!aliasDb_) {
-      // If we don't have aliasing information, we have to disallow DCE for all
-      // mutable ops, since we're not sure what they affect.
-      has_side_effects |= isMutable(node);
-    }
+    bool has_side_effects =
+        node->kind() == prim::Print || node->kind() == prim::RaiseException ||
+        std::any_of(
+            node->blocks().begin(), node->blocks().end(), [&](Block* b) {
+              return std::any_of(
+                  b->nodes().begin(), b->nodes().end(), [&](Node* n) {
+                    return hasSideEffects(n);
+                  });
+            }) || hasUntrackedMutation(node);
 
     memo_.emplace(node, has_side_effects);
     return has_side_effects;
@@ -200,14 +173,16 @@ class DeadCodeEliminator {
 
   c10::optional<AliasDb> aliasDb_;
   std::unordered_map<Node*, bool> memo_;
+  std::unordered_set<Node*> marked_;
+  std::list<Node*> workQueue_;
 };
 
 void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
-  DeadCodeEliminator(graph).runMarkSweep(graph->block(), true);
+  DeadCodeEliminator(graph).run(graph->block(), true);
 }
 
 void EliminateDeadCode(Block* block, bool recurse) {
-  DeadCodeEliminator().runMarkSweep(block, recurse);
+  DeadCodeEliminator().run(block, recurse);
 }
 
 } // namespace jit
