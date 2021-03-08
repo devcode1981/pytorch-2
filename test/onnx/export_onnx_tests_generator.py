@@ -1,8 +1,3 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
-
 from torch.autograd import Variable
 from onnx import numpy_helper
 
@@ -13,9 +8,8 @@ import shutil
 import torch
 import traceback
 
-import test_pytorch_common
 import test_onnx_common
-from common_nn import module_tests
+from torch.testing._internal.common_nn import module_tests
 from test_nn import new_module_tests
 
 
@@ -33,6 +27,8 @@ def get_test_name(testcase):
 # Take a test case (a dict) as input, return the input for the module.
 def gen_input(testcase):
     if "input_size" in testcase:
+        if testcase["input_size"] == () and "desc" in testcase and testcase["desc"][-6:] == "scalar":
+            testcase["input_size"] = (1,)
         return Variable(torch.randn(*testcase["input_size"]))
     elif "input_fn" in testcase:
         input = testcase["input_fn"]()
@@ -128,7 +124,7 @@ def convert_tests(testcases, sets=1):
                 input = gen_input(t)
                 if (module_name != "FunctionalModule"):
                     nn_module[module_name] |= 1
-        except:  # noqa: E722
+        except:  # noqa: E722,B001
             traceback.print_exc()
             if (module_name != "FunctionalModule"):
                 nn_module[module_name] |= 2

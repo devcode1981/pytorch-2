@@ -2,10 +2,10 @@
 # can gradually remove this test script. DO NOT ADD MORE TESTS TO THIS
 # FILE.
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 import numpy as np
 from caffe2.python import (
     brew,
@@ -23,7 +23,7 @@ from caffe2.proto import caffe2_pb2
 import unittest
 
 
-if (workspace.has_gpu_support or workspace.has_hip_support) and workspace.NumGpuDevices() > 0:
+if workspace.has_gpu_support and workspace.NumGpuDevices() > 0:
     gpu_device_option = caffe2_pb2.DeviceOption()
     gpu_device_option.device_type = workspace.GpuDeviceType
     cpu_device_option = caffe2_pb2.DeviceOption()

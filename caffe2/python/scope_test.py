@@ -1,10 +1,9 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from caffe2.python import scope, core, workspace
-from caffe2.proto import caffe2_pb2
 
 import unittest
 import threading
@@ -54,6 +53,14 @@ class TestScope(unittest.TestCase):
             pass
 
         self.assertEquals(scope.CurrentNameScope(), "")
+
+    def testEmptyNamescopeBasic(self):
+        self.assertEquals(scope.CurrentNameScope(), "")
+
+        with scope.NameScope("test_scope"):
+            with scope.EmptyNameScope():
+                self.assertEquals(scope.CurrentNameScope(), "")
+            self.assertEquals(scope.CurrentNameScope(), "test_scope/")
 
     def testDevicescopeBasic(self):
         self.assertEquals(scope.CurrentDeviceScope(), None)

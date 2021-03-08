@@ -38,8 +38,9 @@ void ColwiseMaxAndArg(
 
 class ViterbiPathOp : public Operator<CPUContext> {
  public:
-  ViterbiPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit ViterbiPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
 
   void GatherRow(
       const TensorCPU& data,
@@ -146,12 +147,12 @@ class ViterbiPathOp : public Operator<CPUContext> {
 };
 class SwapBestPathOp : public Operator<CPUContext> {
  public:
-  SwapBestPathOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws) {}
+  template <class... Args>
+  explicit SwapBestPathOp(Args&&... args)
+      : Operator(std::forward<Args>(args)...) {}
   bool RunOnDevice() override {
     auto& data = Input(0);
     auto& newBestIdicies = Input(1);
-    auto* updatedData = Output(0);
 
     CAFFE_ENFORCE(
         data.dim() == 2 && newBestIdicies.dim() == 1,
@@ -161,7 +162,7 @@ class SwapBestPathOp : public Operator<CPUContext> {
         data.size(0) == newBestIdicies.size(0),
         "predictions and bestPath dimensions not matching");
 
-    updatedData->ResizeLike(data);
+    auto* updatedData = Output(0, data.sizes(), at::dtype<float>());
     float* outData = updatedData->template mutable_data<float>();
     context_.CopyItemsSameDevice(
         data.dtype(), data.numel(), data.template data<float>(), outData);
@@ -208,7 +209,7 @@ OPERATOR_SCHEMA(SwapBestPath)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a sequence of idices and a matrix, enforce that these indices have the
+Given a sequence of indices and a matrix, enforce that these indices have the
 best columnwise scores
 score
 )DOC")

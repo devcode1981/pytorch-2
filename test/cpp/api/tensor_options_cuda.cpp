@@ -1,10 +1,8 @@
 #include <gtest/gtest.h>
 
-#include <ATen/Context.h>
-#include <ATen/DeviceGuard.h>
-#include <ATen/Functions.h>
-#include <c10/core/ScalarType.h>
-#include <ATen/core/TensorOptions.h>
+#include <torch/torch.h>
+
+#include <torch/cuda.h>
 
 // NB: This file is compiled even in CPU build (for some reason), so
 // make sure you don't include any CUDA only headers.
@@ -30,8 +28,8 @@ at::Device CUDADevice(DeviceIndex index) {
 #define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)                \
   ASSERT_EQ(tensor.device().type(), Device((device_), (index_)).type());   \
   ASSERT_EQ(tensor.device().index(), Device((device_), (index_)).index()); \
-  ASSERT_EQ(tensor.type().scalarType(), (type_));                          \
-  ASSERT_TRUE(tensor.type().layout() == (layout_))
+  ASSERT_EQ(tensor.scalar_type(), (type_));                                \
+  ASSERT_TRUE(tensor.options().layout() == (layout_))
 
 TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   auto options = CUDA(kFloat).options();
@@ -40,17 +38,17 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATypes_CUDA) {
   options = CUDA(kInt).options();
   REQUIRE_OPTIONS(kCUDA, -1, kInt, kStrided);
 
-  options = getNonVariableType(Backend::SparseCUDA, kFloat).options();
+  options = getDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options();
   REQUIRE_OPTIONS(kCUDA, -1, kFloat, kSparse);
 
-  options = getNonVariableType(Backend::SparseCUDA, kByte).options();
+  options = getDeprecatedTypeProperties(Backend::SparseCUDA, kByte).options();
   REQUIRE_OPTIONS(kCUDA, -1, kByte, kSparse);
 
   options = CUDA(kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kStrided);
 
   options =
-      getNonVariableType(Backend::SparseCUDA, kFloat).options(/*device=*/5);
+      getDeprecatedTypeProperties(Backend::SparseCUDA, kFloat).options(/*device=*/5);
   REQUIRE_OPTIONS(kCUDA, 5, kFloat, kSparse);
 }
 
@@ -58,10 +56,10 @@ TEST(TensorOptionsTest, ConstructsWellFromCUDATensors_MultiCUDA) {
   auto options = empty(5, device(kCUDA).dtype(kDouble)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kDouble, kStrided);
 
-  options = empty(5, getNonVariableType(Backend::SparseCUDA, kByte)).options();
+  options = empty(5, getDeprecatedTypeProperties(Backend::SparseCUDA, kByte)).options();
   REQUIRE_OPTIONS(kCUDA, 0, kByte, kSparse);
 
-  if (at::globalContext().getNumGPUs() > 1) {
+  if (torch::cuda::device_count() > 1) {
     Tensor tensor;
     {
       DeviceGuard guard(CUDADevice(1));

@@ -16,10 +16,11 @@ namespace py = pybind11;
 
 const DLDeviceType* CaffeToDLDeviceType(int device_type);
 
-const DLDataType* CaffeToDLType(const TypeMeta& meta);
+const DLDataType* CaffeToDLType(const TypeMeta meta);
 
-const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
+const TypeMeta DLTypeToCaffe(const DLDataType& dl_type);
 
+// TODO: remove context
 template <class Context>
 class DLPackWrapper {
  public:
@@ -39,7 +40,7 @@ class DLPackWrapper {
     if (tensor->numel() <= 0) {
       tensor->Resize(0);
     }
-    if (tensor->dtype().id() == TypeIdentifier::uninitialized()) {
+    if (tensor->dtype() == ScalarType::Undefined) {
       // treat uninitialized tensor as float tensor
       tensor->template mutable_data<float>();
     }

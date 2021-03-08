@@ -113,6 +113,12 @@ class SafeEnqueueBlobsOp final : public Operator<Context> {
         1, !status, Output(size)->template mutable_data<bool>(), &context_);
     return true;
   }
+
+  void Cancel() override {
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    queue->close();
+  }
 };
 
 template <typename Context>
@@ -192,6 +198,12 @@ class SafeDequeueBlobsOp final : public Operator<Context> {
     return true;
   }
 
+  void Cancel() override {
+    auto queue = Operator<Context>::Inputs()[0]
+                     ->template Get<std::shared_ptr<BlobsQueue>>();
+    queue->close();
+  }
+
  private:
   int numRecords_;
   std::vector<Blob> blobs_;
@@ -244,8 +256,8 @@ class WeightedSampleDequeueBlobsOp final : public Operator<Context> {
     CAFFE_ENFORCE_EQ(OutputSize(), size + 1);
     bool status = queue->blockingRead(this->Outputs());
     if (table_idx_blob_ >= 0) {
-      auto* table_idx_blob_out = Output(table_idx_blob_);
-      table_idx_blob_out->Resize(1);
+      auto* table_idx_blob_out =
+          Output(table_idx_blob_, {1}, at::dtype<int32_t>());
       int32_t* data = table_idx_blob_out->template mutable_data<int32_t>();
       data[0] = idx;
     }

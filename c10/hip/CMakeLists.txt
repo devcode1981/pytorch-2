@@ -28,8 +28,8 @@ set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY
 file(GLOB_RECURSE C10_HIP_HEADERS *.h)
 hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
 
-# Propagate HIP_HCC_FLAGS that were set from Dependencies.cmake
-target_compile_options(c10_hip PRIVATE ${HIP_HCC_FLAGS})
+# Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
+target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})
 
 # caffe2_hip adds a bunch of dependencies like rocsparse, but c10/hip is supposed to be
 # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
@@ -37,7 +37,7 @@ target_compile_options(c10_hip PRIVATE ${HIP_HCC_FLAGS})
 # If building shared library, set dllimport/dllexport proper.
 target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
 # Enable hidden visibility if compiler supports it.
-if (${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
   target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
 endif()
 
@@ -51,6 +51,8 @@ target_include_directories(
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
     $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
     $<INSTALL_INTERFACE:include>)
+
+add_subdirectory(test)
 
 # ---[ Installation
 install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)

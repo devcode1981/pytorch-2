@@ -1,7 +1,7 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-from __future__ import unicode_literals
+
+
+
+
 
 from inspect import currentframe, getframeinfo
 import unittest
@@ -232,8 +232,44 @@ class TestCloneNet(test_util.TestCase):
             "external output not matched",
         )
 
+    def test_control_op_remap(self):
+        # Subnets under If/AsyncIf operators should get name remapping when cloned
+        n = core.Net("original")
+        then_net = core.Net("a")
+        then_net.FC(["inputA"], "fc_a")
+        else_net = core.Net("b")
+        else_net.FC(["inputB"], "fc_b")
+        n.If(
+            inputs=[],
+            outputs=[],
+            then_net=then_net.Proto(),
+            else_net=else_net.Proto(),
+        )
+        copied = n.Clone("copied", blob_remap={"inputA": "inputX"})
+        if_op = copied._net.op[0]
+        self.assertEqual(if_op.arg[0].n.op[0].input, ["inputX"])
+        self.assertEqual(if_op.arg[1].n.op[0].input, ["inputB"])
+
 
 class TestExternalInputs(test_util.TestCase):
+    def testAddExternalInputShouldRaiseIfDuplicate(self):
+        net = core.Net("test")
+        net.AddExternalInput(
+            schema.Struct(("x", schema.Scalar(np.float))),
+        )
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
+    def testAddExternalInputShouldRaiseIfDuplicateInSameCall(self):
+        net = core.Net("test")
+        with self.assertRaises(AssertionError):
+            net.AddExternalInput(
+                schema.Struct(("x", schema.Scalar(np.float))),
+                schema.Struct(("x", schema.Scalar(np.float))),
+            )
+
     def testSetInputRecordWithBlobs(self):
         net = core.Net("test")
         record = schema.NewRecord(net, schema.Struct(
@@ -393,6 +429,7 @@ class TestAppendNet(test_util.TestCase):
 
 class TestExtractPredictorNet(test_util.TestCase):
 
+    @unittest.skipIf('ImageInput' not in workspace.RegisteredOperators(), "Needs OpenCV")
     def test_extract_simple(self):
         from caffe2.python import brew
         from caffe2.python.model_helper import ModelHelper, ExtractPredictorNet
@@ -643,8 +680,7 @@ class TestInferDeviceCpuOnly(test_util.TestCase):
         self.assertEqual(op.input[2], "fc_b")
 
 
-@unittest.skipIf(not workspace.has_gpu_support
-                and not workspace.has_hip_support, 'No GPU support')
+@unittest.skipIf(not workspace.has_gpu_support, 'No GPU support')
 class TestInferDevice(test_util.TestCase):
 
     def setUp(self):
@@ -1177,6 +1213,29 @@ class TestRerouteTensor(test_util.TestCase):
         net.reroute_tensor("conv1", new_op, [net.Proto().op[1]])
         self.assertEqual(new_op, net.Proto().op[1], "insertion failed")
         self.assertEqual(net.Proto().op[2].input[0], "conv1_bn", "reroute failed")
+
+
+class TestRunAllOnGPU(test_util.TestCase):
+    def test_rnn_run_on_gpu(self):
+        step_net = core.Net("step_net")
+        step_net.Conv(["input_1", "w", "b"], "conv1")
+        step_net.Relu(["conv1"], "input_1")
+        net = core.Net("to_run_on_gpu")
+        net.RecurrentNetwork(["input_1"], ["input_1"], step_net=step_net.Proto())
+        net.Relu(["input_1"], "input_relu")
+        # check network structure before conversion
+        net_proto = net.Proto()
+        self.assertFalse(net_proto.HasField('device_option'))
+        self.assertTrue(net_proto.op[0].arg[0].name == 'step_net')
+        self.assertTrue(net_proto.op[0].arg[0].HasField('n'))
+        self.assertFalse(net_proto.op[0].arg[0].n.HasField('device_option'))
+
+        net.RunAllOnGPU(gpu_id=3, use_cudnn=True)
+        # check that root net and rnn net got device_option attribute assigned
+        self.assertTrue(net_proto.HasField('device_option'))
+        self.assertEqual(net_proto.device_option.device_type, workspace.GpuDeviceType)
+        self.assertEqual(net_proto.device_option.device_id, 3)
+        self.assertTrue(net_proto.op[0].arg[0].n.HasField('device_option'))
 
 
 if __name__ == '__main__':
